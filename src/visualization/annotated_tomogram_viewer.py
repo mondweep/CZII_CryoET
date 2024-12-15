@@ -1,7 +1,7 @@
-import os
 import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from ..core.data_loader import CryoETDataset
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+from src.core.data_loader import CryoETDataset
 from dotenv import load_dotenv, find_dotenv
 import zarr
 import napari

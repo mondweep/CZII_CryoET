@@ -1,4 +1,8 @@
-from data_loader import CryoETDataset
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+from src.core.data_loader import CryoETDataset
 import os
 from dotenv import load_dotenv
 import matplotlib.pyplot as plt

@@ -1,4 +1,4 @@
-from data_loader import CryoETDataset
+from src.core.data_loader import CryoETDataset
 import os
 
 # Test data loading
