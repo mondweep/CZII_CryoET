@@ -1,17 +1,27 @@
 import os
 import torch
 import numpy as np
+import pandas as pd
 from dotenv import load_dotenv
-from sklearn.metrics import classification_report, confusion_matrix
-import seaborn as sns
-import matplotlib.pyplot as plt
 import glob
 
 from ..core.model import CryoET3DCNN
 from ..core.data_loader import CryoETDataset
 
+def idx_to_particle_type(idx):
+    """Convert model output index to particle type name"""
+    particle_types = [
+        'apo-ferritin',
+        'ribosome', 
+        'thyroglobulin',
+        'beta-galactosidase',
+        'virus-like-particle',
+        'beta-amylase'
+    ]
+    return particle_types[idx]
+
 def test_model(model_path):
-    """Test the trained model and visualize results"""
+    """Test the trained model and generate submission file"""
     print(f"\nTesting model: {model_path}")
     print("Loading model...")
     
@@ -26,78 +36,99 @@ def test_model(model_path):
     # Load test data
     print("Loading test data...")
     dataset = CryoETDataset(
-        raw_path=os.getenv('DATASET_PATH'),
-        annotated_path=os.getenv('ANNOTATED_DATASET_PATH')
+        raw_path=os.getenv('TEST_DATASET_PATH'),
+        annotated_path=None  # No annotations needed for test data
     )
-    X, y = dataset.create_training_patches()
     
-    # Process test data in batches
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = model.to(device)
+    # Get all test experiments
+    test_experiments = dataset.get_experiment_ids()
+    print(f"Found {len(test_experiments)} test experiments")
     
-    batch_size = 32
+    # Initialize list to store all predictions
     all_predictions = []
+    prediction_id = 0
     
-    print("Making predictions in batches...")
-    for i in range(0, len(X), batch_size):
-        batch_end = min(i + batch_size, len(X))
-        print(f"Processing batch {i//batch_size + 1}/{len(X)//batch_size + 1}")
+    # Process each experiment
+    for exp_id in test_experiments:
+        print(f"\nProcessing experiment: {exp_id}")
         
-        # Process batch
-        batch_X = torch.FloatTensor(X[i:batch_end]).unsqueeze(1).to(device)
+        # Load tomogram
+        tomogram = dataset.load_tomogram(exp_id)
+        if tomogram is None:
+            print(f"Skipping {exp_id} - Could not load tomogram")
+            continue
         
-        with torch.no_grad():
-            outputs = model(batch_X)
-            _, predicted = outputs.max(1)
-            all_predictions.extend(predicted.cpu().numpy())
+        # Define patch size (same as training)
+        patch_size = 64
+        stride = 16  # Smaller stride for denser scanning
         
-        # Clear GPU memory
-        del batch_X
-        torch.cuda.empty_cache() if torch.cuda.is_available() else None
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        model = model.to(device)
+        
+        # Slide through the tomogram
+        for z in range(0, tomogram.shape[0] - patch_size + 1, stride):
+            for y in range(0, tomogram.shape[1] - patch_size + 1, stride):
+                for x in range(0, tomogram.shape[2] - patch_size + 1, stride):
+                    # Extract patch
+                    patch = tomogram[z:z+patch_size, y:y+patch_size, x:x+patch_size]
+                    
+                    # Normalize patch
+                    patch = (patch - patch.mean()) / (patch.std() + 1e-6)
+                    patch_tensor = torch.FloatTensor(patch).unsqueeze(0).unsqueeze(0).to(device)
+                    
+                    # Get prediction
+                    with torch.no_grad():
+                        outputs = model(patch_tensor)
+                        probabilities = torch.softmax(outputs, dim=1)
+                        confidence, predicted = probabilities.max(1)
+                        
+                        # If confident prediction, add to results
+                        if confidence.item() > 0.3:  # Lower threshold for more detections
+                            prediction = {
+                                'id': prediction_id,
+                                'experiment': exp_id,
+                                'particle_type': idx_to_particle_type(predicted.item()),
+                                'x': x + patch_size//2,  # Center coordinates
+                                'y': y + patch_size//2,
+                                'z': z + patch_size//2
+                            }
+                            all_predictions.append(prediction)
+                            prediction_id += 1
+                    
+                    # Clear GPU memory
+                    del patch_tensor
+                    torch.cuda.empty_cache() if torch.cuda.is_available() else None
+        
+        print(f"Found {len(all_predictions) - prediction_id} predictions in {exp_id}")
     
-    # Convert predictions to numpy array
-    y_pred = np.array(all_predictions)
-    y_true = y
+    # Create submission DataFrame
+    if not all_predictions:
+        print("\nWarning: No predictions were made. This might indicate:")
+        print("1. Confidence threshold might be too high (currently 0.5)")
+        print("2. Model might not be detecting any particles")
+        print("3. Input processing might need adjustment")
+        
+        # Create empty DataFrame with correct columns
+        submission_df = pd.DataFrame(columns=['id', 'experiment', 'particle_type', 'x', 'y', 'z'])
+    else:
+        submission_df = pd.DataFrame(all_predictions)
+        submission_df = submission_df[['id', 'experiment', 'particle_type', 'x', 'y', 'z']]
     
-    # Print classification report
-    particle_types = [
-        'apo-ferritin',
-        'ribosome', 
-        'thyroglobulin',
-        'beta-galactosidase',
-        'virus-like-particle',
-        'background'
-    ]
+    # Save submission file
+    submission_path = 'submission.csv'
+    submission_df.to_csv(submission_path, index=False)
+    print(f"\nSubmission file saved as: {submission_path}")
+    print(f"Total predictions: {len(submission_df)}")
+    print("\nSample of predictions:")
+    print(submission_df.head())
     
-    print("\nClassification Report:")
-    print(classification_report(y_true, y_pred, target_names=particle_types))
-    
-    # Plot confusion matrix
-    plt.figure(figsize=(12, 10))
-    cm = confusion_matrix(y_true, y_pred)
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-                xticklabels=particle_types,
-                yticklabels=particle_types)
-    plt.title('Confusion Matrix')
-    plt.ylabel('True Label')
-    plt.xlabel('Predicted Label')
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    
-    # Save the plot
-    plt.savefig('confusion_matrix.png')
-    print("\nConfusion matrix saved as 'confusion_matrix.png'")
-    
-    # Print additional training information
-    print(f"\nTraining information from checkpoint:")
-    print(f"Epoch: {checkpoint['epoch']}")
-    print(f"Training loss: {checkpoint['train_loss']:.4f}")
+    return submission_df
 
 if __name__ == "__main__":
     # Load environment variables
     load_dotenv()
     
-    # Get project root directory (two levels up from this file)
+    # Get project root directory
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     
     # Look for checkpoints in the models directory
@@ -109,16 +140,12 @@ if __name__ == "__main__":
         print("Please ensure model checkpoint files exist in the models directory.")
         exit(1)
     
-    print(f"Found {len(checkpoint_files)} model checkpoints:")
-    for f in checkpoint_files:
-        print(f"- {os.path.basename(f)}")
-    
     # Test the latest checkpoint
     latest_checkpoint = max(checkpoint_files)
     print(f"\nUsing latest checkpoint: {os.path.basename(latest_checkpoint)}")
     
     try:
-        test_model(latest_checkpoint)
+        submission_df = test_model(latest_checkpoint)
     except Exception as e:
         print(f"Error testing model: {str(e)}")
         import traceback
