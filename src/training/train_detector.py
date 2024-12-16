@@ -7,9 +7,9 @@ from tqdm import tqdm
 import logging
 import json
 
-from data_loader import CryoETDataLoader
-from data_preprocessing import CryoETPreprocessor
-from detection_model import CryoETDetector, DetectionLoss
+from src.core.data_loader import CryoETDataset
+from src.preprocessing.data_preprocessing import CryoETPreprocessor
+from src.models.detection_model import CryoETDetector, DetectionLoss
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -192,7 +192,7 @@ if __name__ == "__main__":
     logger.info(f"Using device: {device}")
     
     # Initialize components
-    data_loader = CryoETDataLoader("data")
+    data_loader = CryoETDataset("data")
     preprocessor = CryoETPreprocessor(patch_size=64)
     
     # Get list of experiment runs

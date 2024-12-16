@@ -1,4 +1,4 @@
-def sort_demo():
+def sort_data():
     # Example list with numbers
     numbers = [64, 34, 25, 12, 22, 11, 90]
     
@@ -34,4 +34,4 @@ def sort_demo():
     print(f"\nPeople sorted by age: {sorted_by_age}")
 
 if __name__ == "__main__":
-    sort_demo() 
+    sort_data() 

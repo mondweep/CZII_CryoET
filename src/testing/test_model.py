@@ -124,6 +124,21 @@ def test_model(model_path):
     
     return submission_df
 
+def find_latest_checkpoint():
+    models_dir = 'models'
+    checkpoint_files = []
+    for root, dirs, files in os.walk(models_dir):
+        for file in files:
+            if file.startswith('checkpoint_epoch_') and file.endswith('.pth'):
+                checkpoint_files.append(os.path.join(root, file))
+    
+    if not checkpoint_files:
+        raise FileNotFoundError("No model checkpoints found!")
+    
+    # Sort by epoch number and timestamp
+    latest_checkpoint = sorted(checkpoint_files)[-1]
+    return latest_checkpoint
+
 if __name__ == "__main__":
     # Load environment variables
     load_dotenv()
@@ -132,7 +147,7 @@ if __name__ == "__main__":
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     
     # Look for checkpoints in the models directory
-    checkpoint_pattern = os.path.join(project_root, 'models', 'model_checkpoint_epoch_*.pth')
+    checkpoint_pattern = os.path.join(project_root, 'models', 'checkpoint_epoch_*.pth')
     checkpoint_files = glob.glob(checkpoint_pattern)
     
     if not checkpoint_files:
